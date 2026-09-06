@@ -49,16 +49,26 @@ body {
 }
 
 .applicantphoto {
+  position: absolute;
+  top: 249px;
+  left: 113px;
   height: 115px;
-  margin: 113px;
-  margin-top: 249px;
+  width: 100px;
   border: 1px solid black;
 }
 
-.qr{
-  height: 100px;
-  
+.ono{
+    top: 270px;
+    left: 561px;
+    font-size: 15px;
 }
+
+.qr {
+    position: absolute;
+    top: 860px;
+    left: 116px;
+    height: 73px;
+  }
 
 .paragraph {
   top: 40mm;
@@ -68,9 +78,33 @@ body {
   text-align: justify;
   text-indent: 50px;
   padding: 10px;
-  color: #000000;
+  color: #5f5f5f;
   line-height: 2;
   margin-top: 300px;
+}
+
+.place{
+    top: 810px;
+    left: 175px;
+    font-size: 15px;
+}
+
+.bottomdate{
+    top: 833px;
+    left: 175px;
+    font-size: 15px;
+}
+
+.sign{
+    top: 870px;
+    left: 610px;
+    font-size: 13px;
+}
+
+.tick{
+    top: 862px;
+    left: 594px;
+    height: 50px;
 }
 
 .address {
@@ -81,9 +115,9 @@ body {
 }
 
 .date {
-  top: 260mm;
-  left: 25mm;
-  font-size: 11pt;
+    top: 297px;
+    left: 561px;
+    font-size: 15px;
 }
 
 /* Screen par preview karte waqt page dikhe (print mein hata jayega) */

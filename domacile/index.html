@@ -1,28 +1,250 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Domacile</title>
-    <link rel="stylesheet" href="style.css" />
-  </head>
-  <body>
-    <div class="page">
-      <img class="img" src="template.png" alt="template" />
-      
-      <div class="overlay">
-        <img class="applicantphoto" src="photo.jpg" alt="photo">
-        <div class="text-block paragraph">
-          It is hereby certified that, Shri/Shrimati <b>Basit Sultan Shiralkar</b>
-          Village/Town/City <b>Shiral</b>, Village <b>Shiral</b> Tehsil <b>Chiplun</b>,
-          District <b>Ratnagiri</b> was born on <b>23rd December, 1994 (Twenty Third of
-          December in the year One Thousand Nine Hundred and Ninety Four)</b> at
-          <b>Dapoli Camp</b>, Tehsil <b>Dapoli</b>, District <b>Ratnagiri</b> in the State of
-          <b>'MAHARASHTRA'</b> within the territory of INDIA and is a Citizen of India
-          and has domiciled in the State of Maharashtra.
-        </div>
-        <img class="qr" src="qrcode.png" alt="qrcode">
-      </div>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Domacile</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- QR Code generation library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    /* Basic fallback styles for the form (agar style.css me form styling nahi hai) */
+    #formSection {
+      max-width: 500px;
+      margin: 40px auto;
+      font-family: Arial, sans-serif;
+    }
+    #formSection h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    #formSection label {
+      display: block;
+      margin-top: 12px;
+      font-weight: bold;
+      font-size: 14px;
+    }
+    #formSection input {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      box-sizing: border-box;
+      font-size: 14px;
+    }
+    #formSection button {
+      margin-top: 20px;
+      width: 100%;
+      padding: 10px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ================= FORM SECTION ================= -->
+  <div id="formSection">
+    <h2>Enter Applicant Details</h2>
+
+    <label for="name">Full Name</label>
+    <input type="text" id="name" placeholder="e.g. Basit Sultan Shiralkar">
+
+    <label for="village">Village/Town/City</label>
+    <input type="text" id="village" placeholder="e.g. Shiral">
+
+    <label for="tehsil">Tehsil</label>
+    <input type="text" id="tehsil" placeholder="e.g. Chiplun">
+
+    <label for="district">District</label>
+    <input type="text" id="district" placeholder="e.g. Ratnagiri">
+
+    <label for="dob">Date of Birth</label>
+    <input type="date" id="dob">
+
+    <label for="birthPlace">Place of Birth</label>
+    <input type="text" id="birthPlace" placeholder="e.g. Dapoli Camp">
+
+    <label for="birthTehsil">Birth Tehsil</label>
+    <input type="text" id="birthTehsil" placeholder="e.g. Dapoli">
+
+    <label for="birthDistrict">Birth District</label>
+    <input type="text" id="birthDistrict" placeholder="e.g. Ratnagiri">
+
+    <label for="photoInput">Applicant Photo</label>
+    <input type="file" id="photoInput" accept="image/*">
+
+    <button onclick="generateCertificate()">Generate Certificate</button>
+  </div>
+
+  <!-- ================= CERTIFICATE SECTION ================= -->
+  <div class="page" id="certificateSection" style="display:none;">
+    <img class="img" src="template.png" alt="template" />
+
+    <div class="overlay">
+      <img class="applicantphoto" id="applicantPhoto" src="" alt="photo">
+      <div class="text-block ono">4564562134556</div>
+      <div class="text-block date">24 August, 2024</div>
+      <div class="text-block paragraph" id="certText"></div>
+      <img class="qr" id="qrImage" src="qrcode.png" alt="qrcode">
+      <div class="text-block place">Chiplun</div>
+      <div class="text-block bottomdate">24 August, 2024</div>
+      <img class="tick" src="tick.jpg" alt="tick">
+      <div class="sign">Digitaly signed by<br>HIDAYATULLAH SARVARALI TELI<br>Date: ${datestamp7daysbefore} ${timestampcurrent}</div>
     </div>
-  </body>
+  </div>
+
+  <!-- Hidden container jaha QR temporarily generate hoga -->
+  <div id="qrGenerateBox" style="display:none;"></div>
+
+  <script>
+    // ================= DATE TO WORDS FUNCTION =================
+    function dateToWords(dateStr) {
+      const date = new Date(dateStr);
+      const day = date.getDate();
+      const monthNames = ["January","February","March","April","May","June",
+                           "July","August","September","October","November","December"];
+      const month = monthNames[date.getMonth()];
+      const year = date.getFullYear();
+
+      // Ordinal suffix (1st, 2nd, 3rd, 23rd, etc.)
+      function ordinalSuffix(n) {
+        if (n > 3 && n < 21) return 'th';
+        switch (n % 10) {
+          case 1: return 'st';
+          case 2: return 'nd';
+          case 3: return 'rd';
+          default: return 'th';
+        }
+      }
+
+      // Number to words (0-99)
+      const ones = ["", "One","Two","Three","Four","Five","Six","Seven","Eight","Nine",
+                    "Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen",
+                    "Seventeen","Eighteen","Nineteen"];
+      const tens = ["", "", "Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+
+      function numToWords(n) {
+        if (n === 0) return "Zero";
+        if (n < 20) return ones[n];
+        if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? " " + ones[n % 10] : "");
+        return "";
+      }
+
+      // Ordinal words (First, Second, Third ... Twentieth)
+      const ordinalWords = ["", "First","Second","Third","Fourth","Fifth","Sixth","Seventh",
+        "Eighth","Ninth","Tenth","Eleventh","Twelfth","Thirteenth","Fourteenth","Fifteenth",
+        "Sixteenth","Seventeenth","Eighteenth","Nineteenth","Twentieth"];
+
+      function dayInWords(n) {
+        if (n <= 20) return ordinalWords[n];
+        const tensPart = tens[Math.floor(n / 10)];
+        const onesPart = n % 10;
+        if (onesPart === 0) return tensPart.slice(0, -1) + "ieth"; // e.g. Thirtieth
+        return tensPart + " " + ordinalWords[onesPart];
+      }
+
+      // Year in words (e.g. 1994 -> One Thousand Nine Hundred and Ninety Four)
+      function yearInWords(y) {
+        const thousands = Math.floor(y / 1000);
+        const hundreds = Math.floor((y % 1000) / 100);
+        const remainder = y % 100;
+
+        let words = "";
+        if (thousands > 0) words += numToWords(thousands) + " Thousand ";
+        if (hundreds > 0) words += numToWords(hundreds) + " Hundred ";
+        if (remainder > 0) {
+          if (hundreds > 0 || thousands > 0) words += "and ";
+          words += numToWords(remainder);
+        }
+        return words.trim();
+      }
+
+      const dayNum = day + ordinalSuffix(day);
+      const dayWords = dayInWords(day);
+      const yearWords = yearInWords(year);
+
+      return `${dayNum} ${month}, ${year} (${dayWords} of ${month} in the year ${yearWords})`;
+    }
+
+    // ================= GENERATE CERTIFICATE =================
+    function generateCertificate() {
+      const name = document.getElementById('name').value;
+      const village = document.getElementById('village').value;
+      const tehsil = document.getElementById('tehsil').value;
+      const district = document.getElementById('district').value;
+      const dobRaw = document.getElementById('dob').value;
+      const birthPlace = document.getElementById('birthPlace').value;
+      const birthTehsil = document.getElementById('birthTehsil').value;
+      const birthDistrict = document.getElementById('birthDistrict').value;
+      const photoFile = document.getElementById('photoInput').files[0];
+
+      if (!name || !village || !tehsil || !district || !dobRaw || !birthPlace || !birthTehsil || !birthDistrict) {
+        alert("Kripya saari fields bharein.");
+        return;
+      }
+
+      const dob = dateToWords(dobRaw);
+
+      document.getElementById('certText').innerHTML = `
+        It is hereby certified that, Shri/Shrimati <b>${name}</b>
+        Village/Town/City <b>${village}</b>, Village <b>${village}</b> Tehsil <b>${tehsil}</b>,
+        District <b>${district}</b> was born on <b>${dob}</b> at
+        <b>${birthPlace}</b>, Tehsil <b>${birthTehsil}</b>, District <b>${birthDistrict}</b> in the State of
+        <b>'MAHARASHTRA'</b> within the territory of INDIA and is a Citizen of India
+        and has domiciled in the State of Maharashtra.
+      `;
+
+      if (photoFile) {
+        const reader = new FileReader();
+        reader.onload = function (e) {
+          document.getElementById('applicantPhoto').src = e.target.result;
+        };
+        reader.readAsDataURL(photoFile);
+      }
+
+      // ================= QR CODE GENERATION =================
+      // User input se QR ke liye data banate hain
+      const qrData =
+        `Name: ${name}\n` +
+        `Village: ${village}\n` +
+        `Tehsil: ${tehsil}\n` +
+        `District: ${district}\n` +
+        `DOB: ${dobRaw}\n` +
+        `Birth Place: ${birthPlace}, ${birthTehsil}, ${birthDistrict}\n` +
+        `State: MAHARASHTRA, INDIA`;
+
+      generateQRCode(qrData);
+
+      document.getElementById('formSection').style.display = 'none';
+      document.getElementById('certificateSection').style.display = 'block';
+    }
+
+    // ================= QR CODE HELPER FUNCTION =================
+    function generateQRCode(data) {
+      const qrBox = document.getElementById('qrGenerateBox');
+      qrBox.innerHTML = ""; // purana QR hatao agar hai
+
+      // Naya QR generate karo hidden box me
+      new QRCode(qrBox, {
+        text: data,
+        width: 200,
+        height: 200,
+        correctLevel: QRCode.CorrectLevel.M
+      });
+
+      // Thoda wait karo taaki QR library canvas/image bana le, phir usse img tag me daalo
+      setTimeout(() => {
+        const qrCanvas = qrBox.querySelector('canvas');
+        const qrImg = qrBox.querySelector('img');
+
+        if (qrCanvas) {
+          document.getElementById('qrImage').src = qrCanvas.toDataURL("image/png");
+        } else if (qrImg) {
+          document.getElementById('qrImage').src = qrImg.src;
+        }
+      }, 100);
+    }
+  </script>
+
+</body>
 </html>

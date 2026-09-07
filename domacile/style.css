@@ -45,7 +45,7 @@ body {
 .text-block {
   position: absolute;
   font-family: Arial, sans-serif;
-  color: #000; /* apne template ke background ke hisaab se color badlo */
+  color: #5f5f5f; /* apne template ke background ke hisaab se color badlo */
 }
 
 .applicantphoto {
@@ -95,16 +95,23 @@ body {
     font-size: 15px;
 }
 
-.sign{
-    top: 870px;
-    left: 610px;
+.sign {
+    top: 852px;
+    left: 477px;
     font-size: 13px;
+    color: black;
 }
 
-.tick{
+.tick {
     top: 862px;
     left: 594px;
-    height: 50px;
+    height: 57px;
+}
+
+.qrnumber{
+    top: 943px;
+    left: 116px;
+    font-size: 13px;
 }
 
 .address {

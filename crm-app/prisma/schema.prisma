@@ -1,0 +1,145 @@
+// ============================================================
+// CRM Database Schema — Phase 1
+// Core loop: Employee adds Customer -> Customer applies for a
+// Service (CustomerService record) -> status/reference edited
+// as work progresses -> everything is searchable + logged.
+//
+// This file will grow in later phases (agents, payments,
+// commissions, documents, followups, notifications) without
+// breaking what's here — new tables/columns only.
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  EMPLOYEE
+}
+
+enum ServiceStatus {
+  NEW
+  ASSIGNED
+  PROCESSING
+  DOCUMENT_REQUIRED
+  SUBMITTED
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(EMPLOYEE)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  customersCreated       Customer[]        @relation("CustomerCreatedBy")
+  customerServicesAdded  CustomerService[] @relation("CSCreatedBy")
+  customerServicesEdited CustomerService[] @relation("CSUpdatedBy")
+  activityLogs           ActivityLog[]
+}
+
+model Customer {
+  id           String   @id @default(cuid())
+  customerCode String   @unique // CUS-000001
+  fullName     String
+  mobile       String
+  altMobile    String?
+  email        String?
+  address      String?
+  village      String?
+  tehsil       String?
+  district     String?
+  state        String?
+  pincode      String?
+  dob          DateTime?
+  gender       String?
+  notes        String?
+
+  createdById String
+  createdBy   User     @relation("CustomerCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime? // soft delete
+
+  services CustomerService[]
+
+  @@index([mobile])
+  @@index([fullName])
+}
+
+model Service {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  code          String   @unique
+  description   String?
+  defaultAmount Decimal? @db.Decimal(10, 2)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  customerServices CustomerService[]
+}
+
+// One row = one "customer applied for a service" instance.
+// A customer can have many of these (many services over time).
+model CustomerService {
+  id       String @id @default(cuid())
+  workCode String @unique // WRK-000001
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  status          ServiceStatus @default(NEW)
+  referenceNumber String? // filled in after online submission / completion
+  amount          Decimal?      @db.Decimal(10, 2)
+  notes           String?
+
+  appliedDate    DateTime  @default(now())
+  expectedDate   DateTime?
+  completedDate  DateTime?
+
+  createdById String
+  createdBy   User   @relation("CSCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+
+  updatedById String?
+  updatedBy   User?    @relation("CSUpdatedBy", fields: [updatedById], references: [id])
+  updatedAt   DateTime @updatedAt
+
+  deletedAt DateTime?
+
+  @@index([customerId])
+  @@index([status])
+}
+
+// Polymorphic-ish audit trail: every important create/status
+// change writes a row here. entityType + entityId identify the
+// record; previousValue/newValue hold JSON snapshots.
+model ActivityLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   // e.g. "CUSTOMER_CREATED", "SERVICE_STATUS_CHANGED"
+  entityType String   // "Customer" | "CustomerService"
+  entityId   String
+  previousValue Json?
+  newValue      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+}

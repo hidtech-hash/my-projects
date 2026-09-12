@@ -15,3 +15,8 @@ export async function nextWorkCode(): Promise<string> {
   const count = await prisma.customerService.count();
   return `WRK-${String(count + 1).padStart(6, "0")}`;
 }
+
+export async function nextAgentCode(): Promise<string> {
+  const count = await prisma.agent.count();
+  return `AGT-${String(count + 1).padStart(6, "0")}`;
+}

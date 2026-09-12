@@ -16,7 +16,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
       services: {
         where: { deletedAt: null },
         orderBy: { appliedDate: "desc" },
-        include: { service: true },
+        include: { service: true, agent: true, assignedEmployee: { select: { id: true, name: true } } },
       },
       createdBy: { select: { name: true } },
     },

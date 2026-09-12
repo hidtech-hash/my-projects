@@ -22,6 +22,7 @@ enum Role {
   ADMIN
   MANAGER
   EMPLOYEE
+  AGENT
 }
 
 enum ServiceStatus {
@@ -33,6 +34,23 @@ enum ServiceStatus {
   COMPLETED
   REJECTED
   CANCELLED
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL
+  PAID
+}
+
+enum AgentStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PaymentRequestStatus {
+  PENDING_VERIFICATION
+  APPROVED
+  REJECTED
 }
 
 model User {
@@ -48,7 +66,59 @@ model User {
   customersCreated       Customer[]        @relation("CustomerCreatedBy")
   customerServicesAdded  CustomerService[] @relation("CSCreatedBy")
   customerServicesEdited CustomerService[] @relation("CSUpdatedBy")
+  assignedServices       CustomerService[] @relation("CSAssignedEmployee")
+  agentsCreated          Agent[]           @relation("AgentCreatedBy")
   activityLogs           ActivityLog[]
+
+  // If this User's role is AGENT, this is their linked Agent profile
+  // (one login <-> one agent). Null for non-agent users.
+  agentProfile Agent? @relation("AgentUserAccount")
+
+  // Payment verification workflow: an agent submits requests under
+  // their own user id; an admin/manager verifies them under theirs.
+  paymentRequestsSubmitted AgentPaymentRequest[] @relation("PaymentSubmittedBy")
+  paymentRequestsVerified  AgentPaymentRequest[] @relation("PaymentVerifiedBy")
+  upiConfigsUpdated        UpiConfig[]           @relation("UpiConfigUpdatedBy")
+}
+
+// An agent refers customers/work to us. Agents don't have their own
+// commission rate — instead, each Service defines a fixed "agent price"
+// (see Service model below) which is simply the discounted rate we
+// charge when the work comes through any agent. Tracked per applied
+// service (not per customer) so a single customer can come via
+// different agents for different services.
+model Agent {
+  id        String   @id @default(cuid())
+  agentCode String   @unique // AGT-000001
+  name      String
+  mobile    String
+  altMobile String?
+  email     String?
+  address   String?
+  city      String?
+  state     String?
+
+  status AgentStatus @default(ACTIVE)
+  notes  String?
+
+  // Optional login for this agent. When set, that User (role=AGENT)
+  // can log in and see only this agent's own dashboard/applications.
+  // An agent can exist without a login (referral-only, added before
+  // this feature, or intentionally never given portal access).
+  userId String? @unique
+  user   User?   @relation("AgentUserAccount", fields: [userId], references: [id])
+
+  createdById String
+  createdBy   User     @relation("AgentCreatedBy", fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  customerServices CustomerService[]
+  paymentRequests  AgentPaymentRequest[]
+
+  @@index([name])
+  @@index([mobile])
 }
 
 model Customer {
@@ -80,14 +150,21 @@ model Customer {
   @@index([fullName])
 }
 
+// Every service has two fixed prices: what a normal (walk-in) customer
+// pays, and what we charge when the work comes through an agent. There
+// is no commission math anywhere — the agent price IS the price, set
+// here by Admin/Manager, and the system picks the right one
+// automatically based on whether a CustomerService has an agentId.
 model Service {
   id            String   @id @default(cuid())
   name          String   @unique
   code          String   @unique
   description   String?
-  defaultAmount Decimal? @db.Decimal(10, 2)
+  customerPrice Decimal  @default(0) @db.Decimal(10, 2)
+  agentPrice    Decimal  @default(0) @db.Decimal(10, 2)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   customerServices CustomerService[]
 }
@@ -104,10 +181,30 @@ model CustomerService {
   serviceId String
   service   Service @relation(fields: [serviceId], references: [id])
 
+  // Which agent referred this particular applied service (optional —
+  // walk-in / direct customers have none).
+  agentId String?
+  agent   Agent?  @relation(fields: [agentId], references: [id])
+
+  // Which employee this work is assigned to. Nullable — unassigned
+  // work sits in a shared queue until an admin/manager assigns it.
+  assignedEmployeeId String?
+  assignedEmployee   User?   @relation("CSAssignedEmployee", fields: [assignedEmployeeId], references: [id])
+
   status          ServiceStatus @default(NEW)
   referenceNumber String? // filled in after online submission / completion
+  // The actual price charged for this work item. Auto-filled at creation
+  // from Service.agentPrice (if agentId is set) or Service.customerPrice
+  // (if not) — see the apply-service API. Admin/Manager can override it.
   amount          Decimal?      @db.Decimal(10, 2)
   notes           String?
+
+  // What the customer has actually paid us for this work item, and
+  // how much is still pending. This is the single source of truth for
+  // "how much payment is pending from this agent's work" — sum
+  // (amount - amountReceived) across an agent's CustomerServices.
+  amountReceived Decimal?      @default(0) @db.Decimal(10, 2)
+  paymentStatus  PaymentStatus @default(PENDING)
 
   appliedDate    DateTime  @default(now())
   expectedDate   DateTime?
@@ -124,6 +221,58 @@ model CustomerService {
   deletedAt DateTime?
 
   @@index([customerId])
+  @@index([status])
+  @@index([agentId])
+  @@index([assignedEmployeeId])
+}
+
+// Business UPI ID used to generate payment QR codes for agents.
+// Admin/Manager only. Kept as a small history (not a single mutable
+// row) so past configuration is auditable, but only the most recent
+// row with isActive=true is ever used to generate a QR.
+model UpiConfig {
+  id        String   @id @default(cuid())
+  upiId     String // e.g. business@upi
+  payeeName String? // shown in the UPI app as the payee
+  isActive  Boolean  @default(true)
+
+  updatedById String
+  updatedBy   User     @relation("UpiConfigUpdatedBy", fields: [updatedById], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// The manual payment-verification audit trail. An Agent submits one
+// of these after paying via UPI — UTR + screenshot only, NEVER an
+// amount (the agent cannot tell the system how much they paid).
+// A Manager/Admin later verifies the real transaction and enters the
+// actual amount, then approves or rejects. Only an APPROVED row's
+// verifiedAmount counts toward the agent's "received" total — this
+// row IS the payment record; there is no separate ledger table, so
+// there is exactly one place payment history lives.
+model AgentPaymentRequest {
+  id            String               @id @default(cuid())
+  agentId       String
+  agent         Agent                @relation(fields: [agentId], references: [id])
+  utrNumber     String
+  screenshotUrl String
+  status        PaymentRequestStatus @default(PENDING_VERIFICATION)
+
+  // Set only by Manager/Admin on verification — never supplied by
+  // the agent. This is the figure that actually reduces the agent's
+  // pending balance, and only once status = APPROVED.
+  verifiedAmount  Decimal?  @db.Decimal(10, 2)
+  verifiedById    String?
+  verifiedBy      User?     @relation("PaymentVerifiedBy", fields: [verifiedById], references: [id])
+  verifiedAt      DateTime?
+  rejectionReason String?
+
+  submittedById String
+  submittedBy   User     @relation("PaymentSubmittedBy", fields: [submittedById], references: [id])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([agentId])
   @@index([status])
 }
 

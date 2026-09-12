@@ -2,3 +2,5 @@ node_modules/
 .next/
 .env
 *.log
+public/uploads/payment-screenshots/*
+!public/uploads/payment-screenshots/.gitkeep

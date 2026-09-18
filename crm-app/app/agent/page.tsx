@@ -6,7 +6,9 @@ import AgentNav from "@/components/AgentNav";
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: "bg-slate-200 text-slate-700",
+  PENDING_REVIEW: "bg-amber-100 text-amber-700",
   ASSIGNED: "bg-blue-100 text-blue-700",
+  ACCEPTED: "bg-green-100 text-green-700",
   PROCESSING: "bg-amber-100 text-amber-700",
   DOCUMENT_REQUIRED: "bg-orange-100 text-orange-700",
   SUBMITTED: "bg-indigo-100 text-indigo-700",
@@ -18,21 +20,28 @@ const STATUS_COLORS: Record<string, string> = {
 export default function AgentDashboardPage() {
   const [data, setData] = useState<any>(null);
   const [qr, setQr] = useState<any>(null);
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
-    fetch("/api/agent-portal/dashboard")
-      .then((r) => r.json())
-      .then(setData);
     fetch("/api/agent-portal/qr")
       .then((r) => r.json())
       .then(setQr);
   }, []);
 
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      fetch(`/api/agent-portal/dashboard?search=${encodeURIComponent(search)}`)
+        .then((r) => r.json())
+        .then(setData);
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [search]);
+
   if (!data?.agent) {
     return (
       <div>
         <AgentNav />
-        <main className="max-w-4xl mx-auto p-8 text-slate-400">Loading...</main>
+        <main className="max-w-5xl mx-auto p-8 text-slate-400">Loading...</main>
       </div>
     );
   }
@@ -42,10 +51,15 @@ export default function AgentDashboardPage() {
   return (
     <div>
       <AgentNav />
-      <main className="max-w-4xl mx-auto p-8 space-y-8">
-        <div>
-          <h1 className="text-2xl font-semibold">Welcome, {agent.name}</h1>
-          <p className="text-slate-500 text-sm">{agent.agentCode}</p>
+      <main className="max-w-5xl mx-auto p-8 space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold">Welcome, {agent.name}</h1>
+            <p className="text-slate-500 text-sm">{agent.agentCode}</p>
+          </div>
+          <Link href="/agent/apply" className="bg-slate-900 text-white px-4 py-2 rounded text-sm">
+            + Apply for Service
+          </Link>
         </div>
 
         {/* Summary cards */}
@@ -79,12 +93,28 @@ export default function AgentDashboardPage() {
                   This QR always reflects your live pending balance — it updates automatically once a
                   payment is verified.
                 </p>
-                <Link
-                  href="/agent/payments"
-                  className="inline-block mt-3 bg-slate-900 text-white px-3 py-1.5 rounded text-sm"
-                >
-                  Submit Payment Proof →
-                </Link>
+                <div className="flex items-center gap-3 mt-3">
+                  {qr.uri && (
+                    <a
+                      href={qr.uri}
+                      className="inline-block bg-green-700 text-white px-3 py-1.5 rounded text-sm"
+                    >
+                      Pay Through UPI App
+                    </a>
+                  )}
+                  <Link
+                    href="/agent/payments"
+                    className="inline-block bg-slate-900 text-white px-3 py-1.5 rounded text-sm"
+                  >
+                    Submit Payment Proof →
+                  </Link>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">
+                  On a phone, this opens your installed UPI app (Google Pay, PhonePe, Paytm, etc.) with
+                  the amount pre-filled. On a desktop browser it may not do anything — scan the QR with
+                  your phone instead. Either way, this only opens the payment — you still need to submit
+                  the UTR and screenshot below after paying.
+                </p>
               </div>
             </div>
           ) : (
@@ -97,57 +127,75 @@ export default function AgentDashboardPage() {
 
         {/* Applications */}
         <div className="bg-white border rounded-lg overflow-hidden">
-          <h2 className="font-semibold px-6 pt-6 pb-4">My Applications</h2>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100 text-left">
-              <tr>
-                <th className="px-4 py-2">Customer</th>
-                <th className="px-4 py-2">Service</th>
-                <th className="px-4 py-2">Ref. No.</th>
-                <th className="px-4 py-2">Applied</th>
-                <th className="px-4 py-2">Status</th>
-                <th className="px-4 py-2">Amount</th>
-                <th className="px-4 py-2">Received</th>
-                <th className="px-4 py-2">Pending</th>
-              </tr>
-            </thead>
-            <tbody>
-              {applications.length === 0 && (
+          <div className="px-6 pt-6 pb-4 flex items-center justify-between">
+            <h2 className="font-semibold">My Applications</h2>
+            <input
+              className="border rounded px-3 py-1.5 text-sm w-64"
+              placeholder="Search customer, mobile, ref no., service..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[860px]">
+              <thead className="bg-slate-100 text-left">
                 <tr>
-                  <td colSpan={8} className="px-4 py-6 text-center text-slate-400">
-                    No applications yet.
-                  </td>
+                  <th className="px-4 py-2 whitespace-nowrap">Customer</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Service</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Ref. No.</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Applied</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Status</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Amount</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Received</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Pending</th>
+                  <th className="px-4 py-2 whitespace-nowrap">Action</th>
                 </tr>
-              )}
-              {applications.map((a: any) => {
-                const amount = Number(a.amount ?? 0);
-                const received = Number(a.amountReceived ?? 0);
-                return (
-                  <tr key={a.id} className="border-t">
-                    <td className="px-4 py-2">
-                      {a.customer.fullName}
-                      <div className="text-xs text-slate-400">{a.customer.mobile}</div>
-                    </td>
-                    <td className="px-4 py-2">{a.service.name}</td>
-                    <td className="px-4 py-2">{a.referenceNumber ?? "-"}</td>
-                    <td className="px-4 py-2">{new Date(a.appliedDate).toLocaleDateString()}</td>
-                    <td className="px-4 py-2">
-                      <span className={`text-xs px-2 py-1 rounded ${STATUS_COLORS[a.status] ?? "bg-slate-100"}`}>
-                        {a.status.replace(/_/g, " ")}
-                      </span>
-                    </td>
-                    <td className="px-4 py-2">₹{amount.toLocaleString()}</td>
-                    <td className="px-4 py-2">₹{received.toLocaleString()}</td>
-                    <td className="px-4 py-2">
-                      <span className={amount - received > 0 ? "text-amber-700 font-medium" : "text-green-700"}>
-                        ₹{(amount - received).toLocaleString()}
-                      </span>
+              </thead>
+              <tbody>
+                {applications.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
+                      No applications found.
                     </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                )}
+                {applications.map((a: any) => {
+                  const amount = Number(a.amount ?? 0);
+                  const received = Number(a.amountReceived ?? 0);
+                  return (
+                    <tr key={a.id} className="border-t">
+                      <td className="px-4 py-2 max-w-[180px] truncate" title={a.customer.fullName}>
+                        {a.customer.fullName}
+                        <div className="text-xs text-slate-400">{a.customer.mobile}</div>
+                      </td>
+                      <td className="px-4 py-2 max-w-[180px] truncate" title={a.service.name}>
+                        {a.service.name}
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">{a.referenceNumber ?? "-"}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">{new Date(a.appliedDate).toLocaleDateString()}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span className={`text-xs px-2 py-1 rounded ${STATUS_COLORS[a.status] ?? "bg-slate-100"}`}>
+                          {a.status.replace(/_/g, " ")}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">₹{amount.toLocaleString()}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">₹{received.toLocaleString()}</td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <span className={amount - received > 0 ? "text-amber-700 font-medium" : "text-green-700"}>
+                          ₹{(amount - received).toLocaleString()}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 whitespace-nowrap">
+                        <Link href={`/agent/applications/${a.id}`} className="text-blue-600 text-xs font-medium hover:underline">
+                          {a.status === "REJECTED" ? "Fix & Resubmit" : "View"}
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       </main>
     </div>

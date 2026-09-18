@@ -4,3 +4,5 @@ node_modules/
 *.log
 public/uploads/payment-screenshots/*
 !public/uploads/payment-screenshots/.gitkeep
+public/uploads/application-documents/*
+!public/uploads/application-documents/.gitkeep

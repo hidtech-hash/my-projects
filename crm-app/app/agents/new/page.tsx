@@ -66,6 +66,18 @@ export default function NewAgentPage() {
           </div>
           <div>
             <label className="block text-sm mb-1">
+              Enterprise Name <span className="text-red-500">*</span>
+            </label>
+            <input
+              required
+              className="w-full border rounded px-3 py-2 text-sm"
+              placeholder="e.g. ABC Online Services"
+              value={form.enterpriseName ?? ""}
+              onChange={(e) => set("enterpriseName", e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-sm mb-1">
               Mobile <span className="text-red-500">*</span>
             </label>
             <input

@@ -76,6 +76,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
 
 const updateAgentSchema = z.object({
   name: z.string().min(2).optional(),
+  enterpriseName: z.string().min(1, "Enterprise Name cannot be blank").optional(),
   mobile: z.string().min(10).max(15).optional(),
   altMobile: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
@@ -165,6 +166,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
         where: { id: params.id },
         data: {
           name: data.name ?? undefined,
+          enterpriseName: data.enterpriseName ?? undefined,
           mobile: data.mobile ?? undefined,
           altMobile: data.altMobile ?? undefined,
           email: data.email ?? undefined,

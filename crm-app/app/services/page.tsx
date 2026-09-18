@@ -117,6 +117,9 @@ export default function ServicesPage() {
                         <button onClick={() => toggleActive(s)} className="text-slate-600 text-xs hover:underline">
                           {s.isActive ? "Deactivate" : "Activate"}
                         </button>
+                        <Link href={`/services/${s.id}`} className="text-blue-600 text-xs hover:underline">
+                          Configure Fields/Docs
+                        </Link>
                       </td>
                     )}
                   </tr>

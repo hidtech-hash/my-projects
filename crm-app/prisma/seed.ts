@@ -57,10 +57,11 @@ async function main() {
   // as rahul01 lands on this exact agent's dashboard.
   const agent = await prisma.agent.upsert({
     where: { agentCode: "AGT-000001" },
-    update: { userId: agentUser.id },
+    update: { userId: agentUser.id, enterpriseName: "Patil Online Services" },
     create: {
       agentCode: "AGT-000001",
       name: "Rahul Patil",
+      enterpriseName: "Patil Online Services",
       mobile: "9123456780",
       city: "Pune",
       state: "Maharashtra",
@@ -81,6 +82,51 @@ async function main() {
       updatedById: admin.id,
     },
   });
+
+  // Document requirements — PAN Card needs Aadhaar (required) + Photo
+  // (optional). This drives both the agent's upload form and the
+  // staff review checklist generically, with zero hard-coding.
+  const panCard = services[1];
+  const panAadhaarDoc = await prisma.serviceDocumentRequirement.upsert({
+    where: { serviceId_name: { serviceId: panCard.id, name: "Aadhaar Card" } },
+    update: {},
+    create: { serviceId: panCard.id, name: "Aadhaar Card", required: true, sortOrder: 0 },
+  });
+  const panPhotoDoc = await prisma.serviceDocumentRequirement.upsert({
+    where: { serviceId_name: { serviceId: panCard.id, name: "Photo" } },
+    update: {},
+    create: { serviceId: panCard.id, name: "Photo", required: false, sortOrder: 1 },
+  });
+
+  // Dynamic field — Aadhaar Update needs the old Aadhaar number at
+  // submission time, and can record the "updated" confirmation number
+  // later (not required up front, added by staff once available).
+  const aadhaarUpdate = services[3];
+  const aadhaarNumberField = await prisma.serviceField.upsert({
+    where: { serviceId_name: { serviceId: aadhaarUpdate.id, name: "old_aadhaar_number" } },
+    update: {},
+    create: {
+      serviceId: aadhaarUpdate.id,
+      name: "old_aadhaar_number",
+      label: "Existing Aadhaar Number",
+      fieldType: "TEXT",
+      requiredAtSubmission: true,
+      sortOrder: 0,
+    },
+  });
+  await prisma.serviceField.upsert({
+    where: { serviceId_name: { serviceId: aadhaarUpdate.id, name: "update_confirmation_no" } },
+    update: {},
+    create: {
+      serviceId: aadhaarUpdate.id,
+      name: "update_confirmation_no",
+      label: "Update Confirmation Number",
+      fieldType: "TEXT",
+      requiredAtSubmission: false, // becomes available later, added by staff
+      sortOrder: 1,
+    },
+  });
+
 
   const customer = await prisma.customer.upsert({
     where: { customerCode: "CUS-000001" },
@@ -110,6 +156,7 @@ async function main() {
       amount: 350, // agent price
       amountReceived: 350,
       paymentStatus: "PAID",
+      acceptedAt: new Date(Date.now() - 12 * 24 * 60 * 60 * 1000), // 12 days ago — already paid, so irrelevant to "days pending"
       createdById: employee.id,
     },
   });
@@ -130,6 +177,7 @@ async function main() {
       amount: 200, // agent price
       amountReceived: 0,
       paymentStatus: "PENDING",
+      acceptedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000), // 10 days ago — demonstrates the RED "payment pending from" state
       createdById: employee.id,
     },
   });
@@ -148,6 +196,7 @@ async function main() {
       amount: 150,
       amountReceived: 0,
       paymentStatus: "PENDING",
+      acceptedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000), // 3 days ago
       createdById: employee.id,
     },
   });
@@ -164,6 +213,7 @@ async function main() {
       serviceId: services[2].id, // Income Certificate
       status: "NEW",
       amount: 400, // customer price
+      acceptedAt: new Date(),
       createdById: admin.id,
     },
   });
@@ -189,6 +239,68 @@ async function main() {
       },
     });
   }
+
+  // An application Rahul submitted himself (agent portal), still
+  // awaiting employee accept/reject — shows on the org-wide "Pending
+  // Review" queue and does NOT count toward his balance yet.
+  const pendingReviewApp = await prisma.customerService.upsert({
+    where: { workCode: "WRK-000005" },
+    update: {},
+    create: {
+      workCode: "WRK-000005",
+      customerId: customer.id,
+      serviceId: panCard.id,
+      agentId: agent.id,
+      status: "PENDING_REVIEW",
+      amount: panCard.agentPrice,
+      createdById: agentUser.id,
+    },
+  });
+  await prisma.applicationDocument.upsert({
+    where: { id: "seed-doc-pending-aadhaar" },
+    update: {},
+    create: {
+      id: "seed-doc-pending-aadhaar",
+      customerServiceId: pendingReviewApp.id,
+      requirementId: panAadhaarDoc.id,
+      documentName: panAadhaarDoc.name,
+      fileUrl: "/uploads/application-documents/.gitkeep",
+      uploadedById: agentUser.id,
+    },
+  });
+
+  // An application that was already rejected, so you can try the
+  // resubmit/cancel flow from the agent side immediately.
+  const rejectedApp = await prisma.customerService.upsert({
+    where: { workCode: "WRK-000006" },
+    update: {},
+    create: {
+      workCode: "WRK-000006",
+      customerId: customer.id,
+      serviceId: aadhaarUpdate.id,
+      agentId: agent.id,
+      status: "REJECTED",
+      rejectionReason: "Aadhaar number entered doesn't match the uploaded document. Please re-check and resubmit.",
+      amount: aadhaarUpdate.agentPrice,
+      createdById: agentUser.id,
+    },
+  });
+  await prisma.applicationFieldValue.upsert({
+    where: {
+      customerServiceId_serviceFieldId: {
+        customerServiceId: rejectedApp.id,
+        serviceFieldId: aadhaarNumberField.id,
+      },
+    },
+    update: {},
+    create: {
+      customerServiceId: rejectedApp.id,
+      serviceFieldId: aadhaarNumberField.id,
+      value: "1234-5678-9999",
+      updatedById: agentUser.id,
+    },
+  });
+
 
   console.log("Seed complete.");
   console.log("Admin/Manager/Employee login: admin@example.com / manager@example.com / employee@example.com — password ChangeMe123!");

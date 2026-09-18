@@ -2,7 +2,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions, canManageServices } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getServiceWithConfig } from "@/lib/services";
 import { z } from "zod";
+
+// GET /api/services/:id
+// Returns the service plus its full dynamic configuration — fields
+// and document requirements, in display order. This is what the
+// Service Configuration page (and, indirectly, the agent's Apply
+// for Service form) reads to render everything generically.
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await getServerSession(authOptions);
+  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const service = await getServiceWithConfig(params.id);
+  if (!service) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  return NextResponse.json({ service });
+}
 
 const updateSchema = z.object({
   name: z.string().min(2).optional(),

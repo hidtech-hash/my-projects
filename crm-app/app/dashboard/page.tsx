@@ -32,16 +32,60 @@ export default function DashboardPage() {
 
         {myWork && (
           <>
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid grid-cols-5 gap-4">
+              <StatCard
+                label="Pending Review"
+                value={myWork.counts.pendingReview}
+                tone={myWork.counts.pendingReview > 0 ? "red" : undefined}
+              />
               <StatCard label="Assigned to Me" value={myWork.counts.totalAssigned} />
               <StatCard label="Pending / In Progress" value={myWork.counts.pending} tone="amber" />
               <StatCard
-                label="Needs Reference No."
+                label="Incomplete Applications"
                 value={myWork.counts.needsReference}
                 tone="red"
               />
               <StatCard label="Org-wide Unassigned" value={myWork.counts.unassigned} tone="amber" />
             </div>
+
+            {myWork.pendingReview.length > 0 && (
+              <div className="bg-white border rounded-lg overflow-hidden">
+                <div className="px-6 pt-6 pb-4">
+                  <h2 className="font-semibold">Pending Review — Agent Submissions</h2>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Applications submitted by agents, awaiting accept/reject. Visible to all staff.
+                  </p>
+                </div>
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-100 text-left">
+                    <tr>
+                      <th className="px-4 py-2">Work ID</th>
+                      <th className="px-4 py-2">Customer</th>
+                      <th className="px-4 py-2">Service</th>
+                      <th className="px-4 py-2">Agent</th>
+                      <th className="px-4 py-2">Applied</th>
+                      <th className="px-4 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {myWork.pendingReview.map((cs: any) => (
+                      <tr key={cs.id} className="border-t">
+                        <td className="px-4 py-2">{cs.workCode}</td>
+                        <td className="px-4 py-2">{cs.customer.fullName}</td>
+                        <td className="px-4 py-2">{cs.service.name}</td>
+                        <td className="px-4 py-2">{cs.agent?.name ?? "-"}</td>
+                        <td className="px-4 py-2">{new Date(cs.appliedDate).toLocaleDateString()}</td>
+                        <td className="px-4 py-2">
+                          <Link href={`/applications/${cs.id}`} className="text-blue-600 text-xs hover:underline">
+                            Review →
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {myWork.unassigned.length > 0 && (
               <div className="bg-white border rounded-lg overflow-hidden">

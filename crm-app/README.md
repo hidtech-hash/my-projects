@@ -194,3 +194,122 @@ prisma/
 Tell me which phase to build next — the Aadhaar e-KYC flow, real customer
 document uploads, a proper reports/dashboard-charts module, or something
 else — and I'll add it on top of this same project.
+
+---
+
+## Phase 5 — Agent Self-Service Applications, Dynamic Fields/Documents, Accept/Reject Workflow
+
+This phase adds the biggest architectural piece yet: agents submit their own applications, which flow through a real review workflow, and the fields/documents each service needs are entirely admin-configurable — no per-service code anywhere.
+
+### 1–2. Agent search + Apply for Service
+- Agent Dashboard (`/agent`) now has a search box (customer name, mobile, work code, reference number, service name, status) scoped server-side to that agent's own applications only — the query itself filters by `agentId: agent.id`, so there's no way to widen it into another agent's data.
+- **Apply for Service** (`/agent/apply`): mobile-first customer lookup (find existing or add new) → pick a service → the form renders itself from that service's configuration.
+
+### 3–6. Dynamic documents
+- New **Service Configuration** page (`/services/:id`, linked from the Services list) lets Admin/Manager add/edit/remove **Document Requirements** (name + required/optional) per service — this is what the agent's upload form and the staff review checklist both read from, generically.
+- The agent's apply form always additionally offers 3 **common optional documents** (Aadhaar Card, Photo, Signature) plus a **+ Add Document** button for anything custom-named — none of this is hard-coded per service, and it never overrides what the service actually requires.
+- Submission is blocked server-side (not just in the UI) if any `required` document is missing — the same check exists at resubmit time too.
+
+### 7–9. Dynamic service fields
+- The same Service Configuration page has an **Application Fields** section: Admin/Manager define fields with a type (Text/Number/Date/Email/Phone/Password/Textarea/Select/Checkbox), whether it's required at submission, and whether it can still be edited later — e.g. Passport's `File Number` can be marked "not required initially" so an agent isn't blocked from submitting without it, and staff can fill it in once it exists.
+- The agent's apply form renders whatever fields are configured for the selected service — nothing is hard-coded per service name.
+
+### 12–17. Review workflow and the payment-timing rule
+- Agent-submitted applications start at status **`PENDING_REVIEW`** and show up on a new **org-wide "Pending Review"** section on the staff Dashboard, visible to Admin/Manager/Employee alike.
+- Opening one (`/applications/:id`) shows the full picture — customer, agent, submitted field values, a documents checklist with Required/Optional/Uploaded/Missing indicators, and **Accept**/**Reject** buttons. Rejecting requires a reason (enforced server-side too).
+- **The payment-timing rule is implemented with a single, minimal change**: `lib/agentContext.ts`'s balance calculation now excludes `PENDING_REVIEW`, `REJECTED`, and `CANCELLED` applications from an agent's total/received/pending. There's no separate "add to balance" step to call — the moment staff flip an application's status away from `PENDING_REVIEW` (e.g. to `ACCEPTED`), the very next balance query picks it up automatically. Submitting never inflates an agent's balance; only accepting does.
+- **Resubmit**: from a `REJECTED` application (`/agent/applications/:id`), the agent can update field values and re-upload/add documents, then resubmit — same record, same work code, full history preserved via the activity log. Status returns to `PENDING_REVIEW`.
+- **Cancel**: from a `REJECTED` application, the agent can instead cancel it — status becomes `CANCELLED`, stays in history, never touches the balance.
+
+### 18–21. Customer mobile-first lookup + Edit Customer
+- **Add Customer** (`/customers/new`) now asks for the mobile number first. If a customer already exists with that number, it shows "Customer Found" with a direct link to their profile instead of re-collecting everything. If not, the rest of the form appears with the mobile pre-filled.
+- **Edit Customer**: the customer profile page now has an inline "Edit Customer" toggle — edits the same record in place; every existing application keeps referencing the same customer id.
+- The same lookup logic (`lib/customerLookup.ts`) is shared between the staff flow (`/api/customers/lookup`) and the agent flow (`/api/agent-portal/customers/lookup`) — one function, two thin route wrappers so the AGENT-only middleware boundary stays simple.
+
+### 24–25. Authorization
+- All of the above is layered on the existing role helpers in `lib/auth.ts` — no new role was needed (`ADMIN`/`MANAGER`/`EMPLOYEE`/`AGENT` from Phase 4 cover everything here). An agent physically cannot reach `/api/customer-services/:id` (the accept/reject endpoint) at all — it's outside the `/api/agent-portal/*` allowlist enforced in `middleware.ts` — so "an agent can't accept their own application" is true by construction, not just a missing button.
+- Every dynamic field/document CRUD endpoint (`/api/services/:id/fields*`, `/api/services/:id/documents*`) is gated by `canManageServices` (Admin/Manager), same tier as pricing.
+
+### Database changes
+- `ServiceStatus` enum: added `PENDING_REVIEW`, `ACCEPTED` (existing values untouched).
+- New models: `ServiceField`, `ServiceDocumentRequirement`, `ApplicationFieldValue`, `ApplicationDocument`.
+- `CustomerService`: added `rejectionReason`, plus relations to the two new "Application*" models.
+- `Customer`: added `updatedById`/`updatedBy` (was missing — needed for Edit Customer's audit trail).
+- `lib/uploads.ts` generalized to `saveApplicationDocument` (images + PDF) alongside the existing `savePaymentScreenshot` (images only) — both are thin wrappers around one shared local-disk helper.
+
+### Setup / applying this update
+```bash
+cd crm-app
+npm install
+npm run prisma:migrate      # e.g. "agent_applications_dynamic_fields_documents"
+npm run dev
+```
+Re-seeds with: document requirements + a dynamic field on two of the sample services, one `PENDING_REVIEW` application (try accepting or rejecting it from `/applications/:id` or the Dashboard's Pending Review section), and one already-`REJECTED` application (try Fix & Resubmit or Cancel from the agent's own dashboard).
+
+### Try it end-to-end
+1. Log in as **rahul01** (Agent) → **Apply for Service** → search an existing mobile (`9876543210`, seeded) → pick **PAN Card** → see the Aadhaar Card (required) / Photo (optional) upload fields appear automatically → submit.
+2. Log in as Admin/Manager/Employee → **Dashboard** → see it under **Pending Review** → open it → **Accept**.
+3. Log back in as rahul01 → Dashboard → pending balance just went up by the PAN Card agent price (₹200) — it wasn't counted before acceptance.
+4. Try the seeded `WRK-000006` (Aadhaar Update, already `REJECTED`) from rahul01's dashboard → **Fix & Resubmit** → see the rejection reason, correct the field, resubmit → it reappears in staff's Pending Review queue.
+5. As Admin/Manager, go to **Services → PAN Card → Configure Fields/Docs** and add a new field or document requirement — reload the agent's Apply for Service form and see it appear with zero code changes.
+
+## What's deliberately NOT in yet
+- Aadhaar e-KYC flow (unrelated to the above; still from the original spec)
+- Full reports/dashboard-charts module, notifications, follow-ups
+- Employee incentive tracking
+- Real object storage for uploads (still local disk — `lib/uploads.ts`)
+- Field/document reordering UI (the `sortOrder` column exists and is respected on read; there's no drag-to-reorder control yet — new items just append to the end)
+- Editing a dynamic field's value from the staff review screen (currently view-only there; editing happens via the agent's resubmit flow, or directly in the database/Prisma Studio for a quick fix)
+
+---
+
+## Bugfix — Agent "Apply for Service" empty service list + My Applications table layout
+
+**Root cause 1 — services not loading for agents:** the Apply for Service page was calling `/api/services` and `/api/services/:id`, which sit outside the `/api/agent-portal/*` allowlist enforced in `middleware.ts` (added in Phase 4 for agent route isolation). Every request from an agent session was silently getting a 403 from the middleware before it ever reached the route handler; the frontend's `d.services ?? []` then quietly rendered an empty list instead of surfacing an error.
+
+Fix: extracted the actual service queries into `lib/services.ts` (`listActiveServices`, `listAllServices`, `getServiceWithConfig`) — one shared source of truth, no duplicate service list, no hard-coding. The existing staff routes (`/api/services`, `/api/services/:id`) now call these same functions. Two new thin wrapper routes, `/api/agent-portal/services` and `/api/agent-portal/services/:id`, call the identical functions from inside the agent-portal namespace so they're reachable under the AGENT middleware allowlist. Any service Admin/Manager marks active in Service Management appears for agents automatically — same data, same `isActive` flag, just a second reachable path to it.
+
+**Root cause 2 — My Applications columns getting clipped:** the table had no horizontal-scroll container and sat inside a `max-w-4xl` page with `overflow-hidden` on the table's wrapper — so with 9 columns plus long service names, the browser compressed columns instead of scrolling, and the View action could end up clipped.
+
+Fix (`app/agent/page.tsx`): wrapped the table in `overflow-x-auto`, gave it a `min-w-[860px]` so columns get a horizontal scrollbar instead of being squeezed unreadable, added `whitespace-nowrap` to all the short/fixed-format columns (ref no., date, status, amounts, action) so they never wrap awkwardly, and `truncate` + `title` tooltip on the Customer/Service columns so one long name can't blow out the layout. Widened the page container from `max-w-4xl` to `max-w-5xl` to match every other table page in the app. No columns were removed — all nine (Customer, Service, Ref. No., Applied, Status, Amount, Received, Pending, Action) are still there, and the View/Fix & Resubmit action is now guaranteed visible via scroll rather than being at risk of clipping.
+
+**Explicitly not touched:** the payment-timing logic in `lib/agentContext.ts` (submitting never adds to an agent's pending balance; only acceptance does), the `/api/agent-portal/applications/:id` scoping that prevents one agent from reaching another's data, and every other existing workflow — this was a two-file-plus-one-shared-helper fix, nothing else in the app changed.
+
+---
+
+## Bugfix round 2 — accepted applications vanishing, agent search crash, plus Agent Management improvements
+
+### 1–2. "Forbidden: cannot reassign work" + accepted applications not appearing anywhere
+
+**Root cause:** two bugs compounding. First, the customer-profile edit form always resent `assignedEmployeeId` in its save request — even when the user never touched that control — and the server compared the incoming value against the *acting user's own id* instead of the *record's current value*. Any Employee without reassignment permission saving a reference number on an application that had no assignee yet (which was *every* agent-submitted application, since nothing ever assigned one) got rejected as a false "reassignment." Second, and the real root of "it doesn't appear in Incomplete Applications": nothing ever auto-assigned an accepted application to anyone, so it had nowhere to show up as "my work."
+
+**Fix:**
+- `app/api/customer-services/[id]/route.ts` now compares the *effective* new assignee against the record's *existing* assignee — resending an unchanged value, or self-claiming, is always allowed regardless of role; only an actual handoff to someone else still requires `canAssignWork`.
+- Accepting a previously-unassigned application now auto-assigns it to whoever accepts it (same pattern as an employee's own customer intake auto-assigning to themselves). It immediately shows up under the existing **Incomplete Applications** dashboard section (this label already existed from Phase 5 — it just had nothing to show).
+- A new `acceptedAt` timestamp is stamped the moment an application first becomes balance-eligible (acceptance for agent-submitted work; immediately for staff-created work) — this also became the ledger source for the new "Payment Pending From" column (see below).
+- Added `PUT /api/customer-services/:id/fields` so staff can now fill in/update fields a service marks `editableAfterSubmission` (e.g. a Passport's File Number) — previously view-only.
+
+### 3. Agent Search returning nothing
+
+**Root cause:** the search query unconditionally included `{ status: { equals: <raw search term> } }` against a typed enum column. Prisma throws a validation error for any value that isn't a real `ServiceStatus` member — which is every search term except an exact status name — so the whole query crashed on virtually every real search (a name, a mobile number, a service name).
+
+**Fix:** that clause is now only added when the search term actually matches a known status value (checked against `Object.values(ServiceStatus)`, not a hand-maintained list).
+
+### 4–5. Enterprise Name
+
+`Agent.enterpriseName` is now required when creating an agent (validated both in the form and server-side via Zod). Existing agents created before this field existed default to `""` (a DB default, not a blocked migration) and show "Not set" in the list / a prompt to add one on their profile — nothing about existing data was made invalid. The Agent Portal navbar (`AgentNav`) now fetches the logged-in agent's own `enterpriseName` via a new lightweight `/api/agent-portal/me` endpoint and displays it in place of the hard-coded "Agent Portal" label.
+
+### 6–7. Agent list columns + Agent Management summary cards
+
+Both are entirely ledger-derived (`lib/agentContext.ts`), never computed in the UI:
+- **Pending Payment** — same balance calculation used everywhere else.
+- **Payment Pending From** — days since `acceptedAt` on the *oldest* currently-unpaid application for that agent; green at ≤7 days, red beyond; "No Due" (not "0 days") when nothing is outstanding.
+- **Summary cards** (`GET /api/agents/summary`) — Total Agents, Total/Paid/Pending Payment, Agents With/Without Due. "Paid" specifically sums *approved* `AgentPaymentRequest.verifiedAmount` (per the spec's "only verified/approved payments count as paid"), which is deliberately a different figure from the general `amountReceived` sum used for "pending," since the latter can also be adjusted directly by staff for edge cases (e.g. the existing "Mark Fully Paid" shortcut).
+
+### 8. Payment logic
+
+Unchanged — verified by re-reading `lib/agentContext.ts`'s `EXCLUDED_FROM_BALANCE` list and the allocation logic before touching anything else in this round. The only related change was exporting that list so the acceptance endpoint could reuse the exact same source of truth for "when does this become balance-eligible" instead of duplicating it.
+
+### 9–10. "Pay Through UPI App"
+
+Added next to the QR on the Agent Dashboard as a plain `<a href="upi://...">` link — the standard way to trigger an installed UPI app on mobile. Uses the same server-computed `uri` the QR is generated from (now also returned by `/api/agent-portal/qr`), so there's no separate path for an agent to influence the amount. On desktop it simply does nothing harmful if unsupported; a caption below explains to scan the QR instead. The CRM still never assumes a payment succeeded — the UTR + screenshot + manual verification flow is completely unchanged.

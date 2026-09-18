@@ -87,6 +87,10 @@ export async function POST(req: NextRequest) {
       agentId: data.agentId || null,
       assignedEmployeeId,
       status: assignedEmployeeId ? "ASSIGNED" : "NEW",
+      // Staff-created applications start balance-eligible immediately
+      // (they never go through PENDING_REVIEW), so acceptedAt is now
+      // — see lib/agentContext.ts for how this drives "days pending".
+      acceptedAt: new Date(),
       amount,
       expectedDate: data.expectedDate ? new Date(data.expectedDate) : null,
       notes: data.notes || null,

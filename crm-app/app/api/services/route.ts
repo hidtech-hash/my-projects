@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions, canManageServices } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { listActiveServices, listAllServices } from "@/lib/services";
 import { z } from "zod";
 
 // GET /api/services
@@ -15,10 +16,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const includeAll = searchParams.get("all") === "1";
 
-  const services = await prisma.service.findMany({
-    where: includeAll ? {} : { isActive: true },
-    orderBy: { name: "asc" },
-  });
+  const services = includeAll ? await listAllServices() : await listActiveServices();
   return NextResponse.json({ services });
 }
 

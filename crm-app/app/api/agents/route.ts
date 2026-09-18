@@ -4,10 +4,15 @@ import { authOptions, canManageAgents } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { nextAgentCode } from "@/lib/codes";
 import { logActivity } from "@/lib/activityLog";
+import { getAllAgentsBalances } from "@/lib/agentContext";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 
 // GET /api/agents?search=raj
+// Each agent in the list now also carries `pendingPayment` and
+// `pendingSinceDays` (null if no due) — computed from the same
+// ledger-based calculation used everywhere else (lib/agentContext.ts),
+// never from anything the frontend supplies.
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -21,6 +26,7 @@ export async function GET(req: NextRequest) {
       ? {
           OR: [
             { name: { contains: search, mode: "insensitive" as const } },
+            { enterpriseName: { contains: search, mode: "insensitive" as const } },
             { mobile: { contains: search } },
             { agentCode: { contains: search, mode: "insensitive" as const } },
           ],
@@ -28,20 +34,35 @@ export async function GET(req: NextRequest) {
       : {}),
   };
 
-  const agents = await prisma.agent.findMany({
-    where,
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: { select: { customerServices: true } },
-      user: { select: { email: true, isActive: true } },
-    },
+  const [agents, balances] = await Promise.all([
+    prisma.agent.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      include: {
+        _count: { select: { customerServices: true } },
+        user: { select: { email: true, isActive: true } },
+      },
+    }),
+    getAllAgentsBalances(),
+  ]);
+
+  const now = Date.now();
+  const enriched = agents.map((a) => {
+    const b = balances[a.id];
+    const pendingPayment = b ? Math.max(0, b.total - b.received) : 0;
+    const pendingSinceDays =
+      pendingPayment > 0 && b?.oldestUnpaidAcceptedAt
+        ? Math.floor((now - new Date(b.oldestUnpaidAcceptedAt).getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+    return { ...a, pendingPayment, pendingSinceDays };
   });
 
-  return NextResponse.json({ agents });
+  return NextResponse.json({ agents: enriched });
 }
 
 const createAgentSchema = z.object({
   name: z.string().min(2),
+  enterpriseName: z.string().min(1, "Enterprise Name is required"),
   mobile: z.string().min(10).max(15),
   altMobile: z.string().optional(),
   email: z.string().email().optional().or(z.literal("")),
@@ -57,8 +78,10 @@ const createAgentSchema = z.object({
 
 // POST /api/agents
 // No commission fields — agents simply get the fixed "agent price"
-// defined per service (see /api/services). Optionally also creates
-// a portal login (role=AGENT) linked 1:1 to this agent record.
+// defined per service (see /api/services). Enterprise Name is
+// mandatory (server-side, not just in the form) — an agent cannot be
+// created without one. Optionally also creates a portal login
+// (role=AGENT) linked 1:1 to this agent record.
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   const role = (session?.user as any)?.role;
@@ -107,6 +130,7 @@ export async function POST(req: NextRequest) {
       data: {
         agentCode,
         name: data.name,
+        enterpriseName: data.enterpriseName,
         mobile: data.mobile,
         altMobile: data.altMobile || null,
         email: data.email || null,
@@ -125,7 +149,7 @@ export async function POST(req: NextRequest) {
     action: "AGENT_CREATED",
     entityType: "Agent",
     entityId: agent.id,
-    newValue: { agentCode: agent.agentCode, name: agent.name, loginCreated: !!data.createLogin },
+    newValue: { agentCode: agent.agentCode, name: agent.name, enterpriseName: agent.enterpriseName, loginCreated: !!data.createLogin },
   });
 
   return NextResponse.json({ agent }, { status: 201 });

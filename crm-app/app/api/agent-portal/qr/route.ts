@@ -34,12 +34,16 @@ export async function GET() {
     return NextResponse.json({ pending: balance.pending, qr: null, error: "UPI not configured yet" });
   }
 
-  const { dataUrl } = await generateUpiQrDataUrl({
+  const { uri, dataUrl } = await generateUpiQrDataUrl({
     upiId: config.upiId,
     payeeName: config.payeeName,
     amount: balance.pending,
     note: `${agent.agentCode} pending payment`,
   });
 
-  return NextResponse.json({ pending: balance.pending, qr: dataUrl });
+  // `uri` (the raw upi://pay?... deep link) is what the "Pay Through
+  // UPI App" button uses to open the agent's installed UPI app
+  // directly — same server-computed amount as the QR, so there's no
+  // separate path for the agent to influence what gets pre-filled.
+  return NextResponse.json({ pending: balance.pending, qr: dataUrl, uri });
 }

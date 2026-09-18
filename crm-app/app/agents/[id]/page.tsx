@@ -7,6 +7,7 @@ import Nav from "@/components/Nav";
 export default function AgentProfilePage({ params }: { params: { id: string } }) {
   const [data, setData] = useState<any>(null);
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [editingEnterprise, setEditingEnterprise] = useState(false);
 
   const load = useCallback(() => {
     fetch(`/api/agents/${params.id}`)
@@ -58,7 +59,29 @@ export default function AgentProfilePage({ params }: { params: { id: string } })
       <Nav />
       <main className="max-w-5xl mx-auto p-8 space-y-8">
         <div className="bg-white border rounded-lg p-6">
-          <h1 className="text-xl font-semibold">{agent.name}</h1>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-xl font-semibold">{agent.name}</h1>
+            {!editingEnterprise && (
+              <button onClick={() => setEditingEnterprise(true)} className="text-blue-600 text-xs hover:underline">
+                {agent.enterpriseName ? "Edit Enterprise Name" : "+ Add Enterprise Name"}
+              </button>
+            )}
+          </div>
+          {editingEnterprise ? (
+            <EditEnterpriseNameForm
+              agentId={agent.id}
+              current={agent.enterpriseName ?? ""}
+              onDone={() => {
+                setEditingEnterprise(false);
+                load();
+              }}
+              onCancel={() => setEditingEnterprise(false)}
+            />
+          ) : (
+            <p className={`text-sm mb-2 ${agent.enterpriseName ? "text-slate-700" : "text-amber-600"}`}>
+              {agent.enterpriseName || "No Enterprise Name set — shown in the Agent Portal navbar once added."}
+            </p>
+          )}
           <p className="text-slate-500 text-sm mb-3">
             {agent.agentCode} · {agent.mobile} · {agent.city ?? "-"}, {agent.state ?? "-"}
           </p>
@@ -336,6 +359,66 @@ function CreateOrResetLoginForm({
         {saving ? "Saving..." : hasLogin ? "Reset Password" : "Create Login"}
       </button>
       {error && <p className="text-red-600 text-xs">{error}</p>}
+    </div>
+  );
+}
+
+function EditEnterpriseNameForm({
+  agentId,
+  current,
+  onDone,
+  onCancel,
+}: {
+  agentId: string;
+  current: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(current);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function submit() {
+    if (!value.trim()) {
+      setError("Enterprise Name cannot be blank.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    const res = await fetch(`/api/agents/${agentId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enterpriseName: value.trim() }),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setError(d.error?.toString?.() || "Could not save.");
+      return;
+    }
+    onDone();
+  }
+
+  return (
+    <div className="flex items-end gap-3 mb-2">
+      {error && <p className="text-red-600 text-xs">{error}</p>}
+      <div>
+        <input
+          className="w-64 border rounded px-2 py-1.5 text-sm"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+        />
+      </div>
+      <button
+        onClick={submit}
+        disabled={saving}
+        className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm disabled:opacity-50"
+      >
+        {saving ? "Saving..." : "Save"}
+      </button>
+      <button onClick={onCancel} className="text-slate-500 text-sm px-2">
+        Cancel
+      </button>
     </div>
   );
 }

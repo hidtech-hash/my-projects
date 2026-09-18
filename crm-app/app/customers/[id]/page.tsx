@@ -6,7 +6,9 @@ import Nav from "@/components/Nav";
 
 const STATUS_OPTIONS = [
   "NEW",
+  "PENDING_REVIEW",
   "ASSIGNED",
+  "ACCEPTED",
   "PROCESSING",
   "DOCUMENT_REQUIRED",
   "SUBMITTED",
@@ -17,7 +19,9 @@ const STATUS_OPTIONS = [
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: "bg-slate-200 text-slate-700",
+  PENDING_REVIEW: "bg-amber-100 text-amber-700",
   ASSIGNED: "bg-blue-100 text-blue-700",
+  ACCEPTED: "bg-green-100 text-green-700",
   PROCESSING: "bg-amber-100 text-amber-700",
   DOCUMENT_REQUIRED: "bg-orange-100 text-orange-700",
   SUBMITTED: "bg-indigo-100 text-indigo-700",
@@ -38,6 +42,7 @@ export default function CustomerProfilePage({ params }: { params: { id: string }
   const [employees, setEmployees] = useState<any[]>([]);
   const [showApply, setShowApply] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingCustomer, setEditingCustomer] = useState(false);
 
   const load = useCallback(() => {
     fetch(`/api/customers/${params.id}`)
@@ -82,12 +87,28 @@ export default function CustomerProfilePage({ params }: { params: { id: string }
                 {customer.customerCode} · {customer.mobile}
               </p>
             </div>
+            {!editingCustomer && (
+              <button onClick={() => setEditingCustomer(true)} className="text-blue-600 text-sm hover:underline">
+                Edit Customer
+              </button>
+            )}
           </div>
-          <div className="grid grid-cols-3 gap-4 text-sm text-slate-600">
-            <div>Email: {customer.email ?? "-"}</div>
-            <div>District: {customer.district ?? "-"}</div>
-            <div>State: {customer.state ?? "-"}</div>
-          </div>
+          {editingCustomer ? (
+            <EditCustomerForm
+              customer={customer}
+              onDone={() => {
+                setEditingCustomer(false);
+                load();
+              }}
+              onCancel={() => setEditingCustomer(false)}
+            />
+          ) : (
+            <div className="grid grid-cols-3 gap-4 text-sm text-slate-600">
+              <div>Email: {customer.email ?? "-"}</div>
+              <div>District: {customer.district ?? "-"}</div>
+              <div>State: {customer.state ?? "-"}</div>
+            </div>
+          )}
         </div>
 
         {/* Applied services */}
@@ -153,6 +174,9 @@ export default function CustomerProfilePage({ params }: { params: { id: string }
                         {cs.agent && <> · Agent: {cs.agent.name}</>}
                         {cs.assignedEmployee && <> · Assigned: {cs.assignedEmployee.name}</>}
                       </p>
+                      {cs.status === "REJECTED" && cs.rejectionReason && (
+                        <p className="text-xs text-red-700 mt-0.5">Rejected: {cs.rejectionReason}</p>
+                      )}
                     </div>
                     <div className="flex items-center gap-3">
                       <span
@@ -171,12 +195,18 @@ export default function CustomerProfilePage({ params }: { params: { id: string }
                       >
                         Payment: {cs.paymentStatus}
                       </span>
-                      <button
-                        onClick={() => setEditingId(cs.id)}
-                        className="text-blue-600 text-sm hover:underline"
-                      >
-                        Edit
-                      </button>
+                      {cs.status === "PENDING_REVIEW" ? (
+                        <a href={`/applications/${cs.id}`} className="text-blue-600 text-sm hover:underline">
+                          Review →
+                        </a>
+                      ) : (
+                        <button
+                          onClick={() => setEditingId(cs.id)}
+                          className="text-blue-600 text-sm hover:underline"
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -201,6 +231,67 @@ export default function CustomerProfilePage({ params }: { params: { id: string }
           </div>
         </div>
       </main>
+    </div>
+  );
+}
+
+function EditCustomerForm({ customer, onDone, onCancel }: { customer: any; onDone: () => void; onCancel: () => void }) {
+  const [form, setForm] = useState({
+    fullName: customer.fullName ?? "",
+    mobile: customer.mobile ?? "",
+    email: customer.email ?? "",
+    address: customer.address ?? "",
+    district: customer.district ?? "",
+    state: customer.state ?? "",
+    pincode: customer.pincode ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    setSaving(true);
+    setError("");
+    const res = await fetch(`/api/customers/${customer.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setError(d.error?.toString?.() || "Could not save.");
+      return;
+    }
+    onDone();
+  }
+
+  return (
+    <div className="space-y-3">
+      {error && <p className="text-red-600 text-xs">{error}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        {Object.entries(form).map(([key, value]) => (
+          <div key={key}>
+            <label className="block text-xs mb-1 capitalize">{key}</label>
+            <input
+              className="w-full border rounded px-2 py-1.5 text-sm"
+              value={value}
+              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+            />
+          </div>
+        ))}
+      </div>
+      <div className="flex gap-3">
+        <button
+          onClick={submit}
+          disabled={saving}
+          className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button onClick={onCancel} className="text-slate-500 text-sm px-2">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -378,6 +469,7 @@ function EditServiceForm({
   onCancel: () => void;
 }) {
   const [status, setStatus] = useState(cs.status);
+  const [rejectionReason, setRejectionReason] = useState(cs.rejectionReason ?? "");
   const [referenceNumber, setReferenceNumber] = useState(cs.referenceNumber ?? "");
   const [notes, setNotes] = useState(cs.notes ?? "");
   const [agentId, setAgentId] = useState(cs.agentId ?? "");
@@ -386,31 +478,48 @@ function EditServiceForm({
   const [amountReceived, setAmountReceived] = useState(cs.amountReceived ?? "");
   const [paymentStatus, setPaymentStatus] = useState(cs.paymentStatus ?? "PENDING");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   async function submit() {
+    if (status === "REJECTED" && !rejectionReason.trim()) {
+      setError("A rejection reason is required.");
+      return;
+    }
     setSaving(true);
+    setError("");
     const body: Record<string, unknown> = {
       status,
       referenceNumber: referenceNumber || undefined,
+      rejectionReason: status === "REJECTED" ? rejectionReason : undefined,
       notes: notes || undefined,
       completedDate: status === "COMPLETED" ? new Date().toISOString() : undefined,
     };
-    // Agent link + assignment: allowed at this permission tier (see
-    // component props); reassigning to someone else is still
-    // enforced server-side as admin/manager-only.
+    // Agent link: allowed at this permission tier for anyone editing
+    // the record — it's just data entry (see server comment). Who
+    // it's ASSIGNED to is only ever sent when the user can actually
+    // change it — an Employee without assign permission never
+    // touches this control, so we don't resend a stale/unrelated
+    // value that could look like a reassignment attempt.
     body.agentId = agentId || null;
-    body.assignedEmployeeId = assignedEmployeeId || null;
+    if (canAssign) {
+      body.assignedEmployeeId = assignedEmployeeId || null;
+    }
     if (canManagePayments) {
       body.amount = amount !== "" ? Number(amount) : undefined;
       body.amountReceived = amountReceived !== "" ? Number(amountReceived) : undefined;
       body.paymentStatus = paymentStatus;
     }
-    await fetch(`/api/customer-services/${cs.id}`, {
+    const res = await fetch(`/api/customer-services/${cs.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     setSaving(false);
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setError(d.error?.toString?.() || "Could not save.");
+      return;
+    }
     onDone();
   }
 
@@ -419,6 +528,7 @@ function EditServiceForm({
       <p className="font-medium text-sm mb-3">
         {cs.service.name} <span className="text-slate-400 font-normal">· {cs.workCode}</span>
       </p>
+      {error && <p className="text-red-600 text-xs mb-3">{error}</p>}
       <div className="grid grid-cols-2 gap-3 mb-3">
         <div>
           <label className="block text-xs mb-1">Status</label>
@@ -444,6 +554,20 @@ function EditServiceForm({
           />
         </div>
       </div>
+
+      {status === "REJECTED" && (
+        <div className="mb-3">
+          <label className="block text-xs mb-1">
+            Rejection Reason <span className="text-red-500">*</span>
+          </label>
+          <input
+            className="w-full border rounded px-2 py-1.5 text-sm"
+            placeholder="e.g. Aadhaar document is unclear"
+            value={rejectionReason}
+            onChange={(e) => setRejectionReason(e.target.value)}
+          />
+        </div>
+      )}
 
       <div className="mb-3">
         <label className="block text-xs mb-1">Notes</label>

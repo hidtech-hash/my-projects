@@ -27,7 +27,13 @@ enum Role {
 
 enum ServiceStatus {
   NEW
+  // Agent-submitted applications start here — awaiting Employee/
+  // Admin/Manager accept-or-reject. Deliberately excluded from an
+  // agent's pending-payment balance (see lib/agentContext.ts) so
+  // submitting work never inflates what an agent owes.
+  PENDING_REVIEW
   ASSIGNED
+  ACCEPTED
   PROCESSING
   DOCUMENT_REQUIRED
   SUBMITTED
@@ -53,6 +59,18 @@ enum PaymentRequestStatus {
   REJECTED
 }
 
+enum ServiceFieldType {
+  TEXT
+  NUMBER
+  DATE
+  EMAIL
+  PHONE
+  PASSWORD
+  TEXTAREA
+  SELECT
+  CHECKBOX
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -64,6 +82,7 @@ model User {
   updatedAt    DateTime @updatedAt
 
   customersCreated       Customer[]        @relation("CustomerCreatedBy")
+  customersUpdated       Customer[]        @relation("CustomerUpdatedBy")
   customerServicesAdded  CustomerService[] @relation("CSCreatedBy")
   customerServicesEdited CustomerService[] @relation("CSUpdatedBy")
   assignedServices       CustomerService[] @relation("CSAssignedEmployee")
@@ -79,6 +98,11 @@ model User {
   paymentRequestsSubmitted AgentPaymentRequest[] @relation("PaymentSubmittedBy")
   paymentRequestsVerified  AgentPaymentRequest[] @relation("PaymentVerifiedBy")
   upiConfigsUpdated        UpiConfig[]           @relation("UpiConfigUpdatedBy")
+
+  // Dynamic application field values / documents this user has
+  // filled in or uploaded (agent at submission, or staff later).
+  fieldValuesEntered ApplicationFieldValue[] @relation("FieldValueUpdatedBy")
+  documentsUploaded  ApplicationDocument[]   @relation("DocumentUploadedBy")
 }
 
 // An agent refers customers/work to us. Agents don't have their own
@@ -91,7 +115,13 @@ model Agent {
   id        String   @id @default(cuid())
   agentCode String   @unique // AGT-000001
   name      String
-  mobile    String
+  // Mandatory for every newly created agent (enforced in the API —
+  // see app/api/agents/route.ts). Defaults to "" only so that
+  // existing rows created before this field existed don't become
+  // invalid at migration time; they'll show a blank value in the UI
+  // until edited, rather than the migration failing or losing data.
+  enterpriseName String  @default("")
+  mobile         String
   altMobile String?
   email     String?
   address   String?
@@ -141,6 +171,9 @@ model Customer {
   createdById String
   createdBy   User     @relation("CustomerCreatedBy", fields: [createdById], references: [id])
   createdAt   DateTime @default(now())
+
+  updatedById String?
+  updatedBy   User?    @relation("CustomerUpdatedBy", fields: [updatedById], references: [id])
   updatedAt   DateTime @updatedAt
   deletedAt   DateTime? // soft delete
 
@@ -167,6 +200,110 @@ model Service {
   updatedAt     DateTime @updatedAt
 
   customerServices CustomerService[]
+
+  // Configurable per service — this is what makes the application
+  // form and document checklist dynamic instead of hard-coded per
+  // service name. See ServiceField / ServiceDocumentRequirement below.
+  fields                ServiceField[]
+  documentRequirements  ServiceDocumentRequirement[]
+}
+
+// A single dynamic field on a service's application form (e.g.
+// Passport's "ARN", Domicile's "User ID"). Admin/Manager-configured;
+// the application form and review screens render these generically —
+// no per-service code branching anywhere.
+model ServiceField {
+  id        String           @id @default(cuid())
+  serviceId String
+  service   Service          @relation(fields: [serviceId], references: [id])
+
+  name  String // machine key, e.g. "arn" — stable once created
+  label String // display label, e.g. "ARN / Application Reference Number"
+  fieldType ServiceFieldType @default(TEXT)
+  options   Json? // for SELECT fields: string[] of choices
+
+  // Whether the Agent must fill this in before they can submit the
+  // application at all. Fields not required at submission (e.g. a
+  // Passport's "File Number") can still be filled in later by staff.
+  requiredAtSubmission    Boolean @default(false)
+  editableAfterSubmission Boolean @default(true)
+
+  visibleToAgent    Boolean @default(true)
+  visibleToEmployee Boolean @default(true)
+  visibleToAdmin    Boolean @default(true)
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  values ApplicationFieldValue[]
+
+  @@unique([serviceId, name])
+  @@index([serviceId])
+}
+
+// A single document requirement on a service (e.g. PAN Card needs
+// "Aadhaar Card" required + "Photo" optional). Admin/Manager-
+// configured; the agent's upload form and the staff review screen
+// both render this list generically.
+model ServiceDocumentRequirement {
+  id        String  @id @default(cuid())
+  serviceId String
+  service   Service @relation(fields: [serviceId], references: [id])
+
+  name      String
+  required  Boolean @default(true)
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  documents ApplicationDocument[]
+
+  @@unique([serviceId, name])
+  @@index([serviceId])
+}
+
+// One submitted value for one dynamic field on one application.
+model ApplicationFieldValue {
+  id                 String       @id @default(cuid())
+  customerServiceId  String
+  customerService    CustomerService @relation(fields: [customerServiceId], references: [id])
+  serviceFieldId     String
+  serviceField       ServiceField @relation(fields: [serviceFieldId], references: [id])
+
+  value String? // stored as text regardless of field type; the form casts on display
+
+  updatedById String?
+  updatedBy   User?    @relation("FieldValueUpdatedBy", fields: [updatedById], references: [id])
+  updatedAt   DateTime @updatedAt
+
+  @@unique([customerServiceId, serviceFieldId])
+}
+
+// One uploaded document on one application. requirementId links it
+// to a configured ServiceDocumentRequirement when it satisfies one;
+// null means it's a common optional document (Aadhaar/Photo/
+// Signature) or a fully custom one the Agent named themselves — both
+// are stored the same way, distinguished only by documentName.
+model ApplicationDocument {
+  id                String                      @id @default(cuid())
+  customerServiceId String
+  customerService   CustomerService             @relation(fields: [customerServiceId], references: [id])
+  requirementId     String?
+  requirement       ServiceDocumentRequirement? @relation(fields: [requirementId], references: [id])
+
+  documentName String
+  fileUrl      String
+
+  uploadedById String
+  uploadedBy   User     @relation("DocumentUploadedBy", fields: [uploadedById], references: [id])
+  uploadedAt   DateTime @default(now())
+
+  @@index([customerServiceId])
 }
 
 // One row = one "customer applied for a service" instance.
@@ -193,6 +330,10 @@ model CustomerService {
 
   status          ServiceStatus @default(NEW)
   referenceNumber String? // filled in after online submission / completion
+  // Set when status = REJECTED (by whoever rejects it). Shown
+  // prominently to the Agent so they know what to fix before
+  // resubmitting. Cleared automatically on resubmit.
+  rejectionReason String?
   // The actual price charged for this work item. Auto-filled at creation
   // from Service.agentPrice (if agentId is set) or Service.customerPrice
   // (if not) — see the apply-service API. Admin/Manager can override it.
@@ -207,6 +348,13 @@ model CustomerService {
   paymentStatus  PaymentStatus @default(PENDING)
 
   appliedDate    DateTime  @default(now())
+  // Set the moment this application first becomes balance-eligible
+  // (see lib/agentContext.ts) — for staff-created work, that's at
+  // creation; for agent-submitted work, that's when it's accepted.
+  // This is what "how many days has this agent's payment been
+  // pending" is measured from — a real ledger timestamp, not a
+  // derived/estimated one.
+  acceptedAt     DateTime?
   expectedDate   DateTime?
   completedDate  DateTime?
 
@@ -219,6 +367,9 @@ model CustomerService {
   updatedAt   DateTime @updatedAt
 
   deletedAt DateTime?
+
+  fieldValues ApplicationFieldValue[]
+  documents   ApplicationDocument[]
 
   @@index([customerId])
   @@index([status])
